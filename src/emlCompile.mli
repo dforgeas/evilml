@@ -15,26 +15,9 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>. *)
 
-open Format
-
-let read_file fname =
-  let open Buffer in
-  let ic = open_in fname in
-  let b = create 256 in
-  try
-    while true do
-      add_string b (input_line ic);
-      add_char b '\n'
-    done;
-    assert false
-  with End_of_file ->
-    close_in ic;
-    contents b
-
-let () =
-  let s = read_file "includes/evilml.hpp" in
-  let oc = open_out "src/evilml_hpp.ml" in
-  let ppf = formatter_of_out_channel oc in
-  fprintf ppf "let contents = %S@." s;
-  pp_print_flush ppf ();
-  close_out oc
+val run :
+  ?loader:(EmlLocation.t -> string -> Lexing.lexbuf) ->
+  ?hook_typing:(EmlTyping.top list -> unit) ->
+  header:string ->
+  string ->
+  Lexing.lexbuf -> EmlCpp.decl list

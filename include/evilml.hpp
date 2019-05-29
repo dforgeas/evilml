@@ -23,13 +23,11 @@ template <int n> struct __ml_int {
 
 template <bool, class T, class F>
 struct __ml_if {
-  static const int tag = 0;
   typedef T type;
 };
 
 template <class T, class F>
 struct __ml_if <false, T, F> {
-  static const int tag = 0;
   typedef F type;
 };
 
@@ -45,20 +43,24 @@ struct __ml_pair {
 template <class x, class y>
 struct __ml_compare {
 private:
-  template <class, int diff, int>
+  template <int diff, int, int>
   struct aux // x::tag != y::tag
     : public __ml_int<diff> {};
 
-  template <class dummy>
-  struct aux <dummy, 0, -1> // x::tag == y::tag && tag == [boxed val]
+  template <int m>
+  struct aux <0, -1, m> // x::tag == y::tag && tag == [boxed val]
     : public __ml_int<(x::val > y::val ? 1 : (x::val < y::val ? -1 : 0))> {};
 
-  template <class dummy>
-  struct aux <dummy, 0, 0> // x::tag == y::tag && tag == [ret val]
-    : public __ml_int<__ml_compare<typename x::type, typename y::type>::val> {};
+  template <int n>
+  struct aux <0, n, 0> // x::tag == y::tag && tag == [nullary constructor]
+    : public __ml_int<0> {};
 
-  template <class dummy, int n>
-  class aux <dummy, 0, n> // x::tag == y::tag && tag == [some constructor]
+  template <int n>
+  class aux <0, n, 1> // x::tag == y::tag && tag == [unary constructor]
+    : public __ml_int<__ml_compare<typename x::fst, typename y::fst>::val> {};
+
+  template <int n>
+  class aux <0, n, 2> // x::tag == y::tag && tag == [binary constructor]
   {
   private:
     static const int tmp = __ml_compare<typename x::fst, typename y::fst>::val;
@@ -67,7 +69,7 @@ private:
   };
 public:
   static const int tag = -1;
-  static const int val = aux<void, x::tag - y::tag, x::tag>::val;
+  static const int val = aux<x::tag - y::tag, x::tag, x::tag & 0x3>::val;
 };
 
 template <class x, class y>
@@ -95,7 +97,8 @@ class __ml_array_of_list {
 private:
   template <class, bool>
   struct aux { // __ml_nil
-    static inline void set (T *) {
+    static inline void set (T * p) {
+      *p = '\0';
       return;
     }
   };
@@ -109,7 +112,7 @@ private:
   };
 public:
   static inline void set (T * p) {
-    aux<void, x::tag == 478463344>::set(p);
+    aux<void, x::tag == 10>::set(p);
     return;
   }
 };
@@ -147,14 +150,14 @@ struct __ml_max {
 struct __ml_int_of_char {
   template <class x>
   struct fun {
-    typedef __ml_char<x::val> type;
+    typedef __ml_int<(unsigned char) x::val> type;
   };
 };
 
 struct __ml_char_of_int {
   template <class x>
   struct fun {
-    typedef __ml_int<x::val> type;
+    typedef __ml_char<x::val> type;
   };
 };
 

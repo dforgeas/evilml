@@ -15,7 +15,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>. *)
 
-type type_var = int
+type type_var [@@deriving show]
 
 type t =
   | Unit
@@ -29,32 +29,62 @@ type t =
   | Var of string option * type_var
   | Ref of t ref (* for destructive unification *)
 
-(** {2 EmlTypes} *)
+(** {2 Sets of type variables} *)
 
-val genvar : ?name:string -> unit -> t
+module VarSet : Set.S with type elt = type_var
+
+(** {2 Types} *)
+
+val fresh_type_var : unit -> type_var
+val fresh_var : ?name:string -> unit -> t
 
 val observe : t -> t
 val is_basetype : t -> bool
 val unarrow : t -> (t list * t) option
+val box_type : t -> bool * t
+val unbox_type : t -> bool * t
+
+(** Returns a set of free type variables in a given type. *)
+val fv_in_type : t -> VarSet.t
 
 val unify : loc:EmlLocation.t -> t -> t -> unit
 
 val pp : Format.formatter -> t -> unit
 
-(** {2 EmlType schemes} *)
+(** {2 Type schemes} *)
 
 type scheme
 
-type context = (string * scheme) list
-
+(** [scheme t] converts type [t] into a type scheme with no generalization,
+    i.e., no type variables are for-all bound. *)
 val scheme : t -> scheme
 
-val generalize : context -> t -> scheme
+(** [generalize set t] generalizes type [t] into a type scheme by substituting
+    type variables in [set] for fresh variables. *)
+val generalize : VarSet.t -> t -> scheme
 
+(** [instantiate ts] instantiates for-all bound type variables in type scheme
+    [ts]. *)
 val instantiate : scheme -> t
+
+(** Returns a set of free type variables in a given type scheme. *)
+val fv_in_scheme : scheme -> VarSet.t
+
+val box_scheme : scheme -> bool * scheme
+val unbox_scheme : scheme -> bool * scheme
 
 val pp_scheme : Format.formatter -> scheme -> unit
 
-(** {2 EmlTyping contexts} *)
+(** {2 Type declaration} *)
 
-val lookup : loc:EmlLocation.t -> string -> context -> scheme
+type constr_tag = int [@@deriving show]
+
+type decl =
+  | Variant of string (* type name *)
+               * type_var list (* type parameters of type constructor *)
+               * (constr_tag * string * t list) list (* constructors *)
+                 [@@deriving show]
+
+val make_constr_tags : (string * t list) list -> constr_tag list
+
+val constr_scheme : string -> type_var list -> t list -> scheme

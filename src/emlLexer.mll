@@ -16,8 +16,8 @@ let () = List.iter (fun (kwd, tok) -> Hashtbl.add keyword_table kwd tok)
     "if", IF;
     "then", THEN;
     "else", ELSE;
-    "true", VBOOL true;
-    "false", VBOOL false;
+    "true", LITERAL_BOOL true;
+    "false", LITERAL_BOOL false;
     "let", LET;
     "rec", REC;
     "in", IN;
@@ -33,6 +33,13 @@ let () = List.iter (fun (kwd, tok) -> Hashtbl.add keyword_table kwd tok)
     "int", INT;
     "float", FLOAT;
     "mod", MOD;
+    "land", LAND;
+    "lor", LOR;
+    "lxor", LXOR;
+    "lnot", LNOT;
+    "lsl", LSL;
+    "lsr", LSR;
+    "asr", ASR;
     "error", ERROR;
   ]
 
@@ -46,23 +53,40 @@ let make_ident lexbuf =
         "Prefix `__ml_' is reserved: %s" s ()
     else if 'A' <= s.[0] && s.[0] <= 'Z' then UIDENT s else LIDENT s
 
+let get_int lexbuf =
+  let s = Lexing.lexeme lexbuf in
+  try int_of_string s
+  with _ -> errorf ~loc:(EmlLocation.from_lexbuf lexbuf)
+              "Error: Illegal integer literal %s" s ()
+
+let get_float lexbuf =
+  let s = Lexing.lexeme lexbuf in
+  try float_of_string s
+  with _ -> errorf ~loc:(EmlLocation.from_lexbuf lexbuf)
+              "Error: Illegal float literal %s" s ()
+
 let get_quoted lexbuf =
   let s = Lexing.lexeme lexbuf in
-  String.sub s 1 (String.length s - 2)
-  |> Scanf.unescaped
+  try
+    String.sub s 1 (String.length s - 2)
+    |> Scanf.unescaped
+  with Scanf.Scan_failure msg ->
+    errorf ~loc:(EmlLocation.from_lexbuf lexbuf)
+      "Error: %s" msg ()
 }
 
+let bdigit = [ '0'-'1' ]
+let odigit = [ '0'-'7' ]
 let digit = [ '0'-'9' ]
-let odigit = [ '0'-'9' ]
-let xdigit = [ '0'-'9' ]
+let xdigit = [ '0'-'9' 'a'-'f' 'A'-'F' ]
 let upper = [ 'A'-'Z' ]
 let lower = [ 'a'-'z' ]
 let sign = [ '+' '-' ]
 
-let int_literal = digit+
+let int_literal = digit+ | "0x" xdigit+ | "0b" bdigit+
 let float_literal = digit+ ('.' digit*)? (['e' 'E'] sign? digit+)?
 let char_literal = '\'' ([^ '\\' '\''] | '\\' _
-                        | '\\' odigit odigit odigit
+                        | '\\' digit+
                         | "\\x" xdigit xdigit) '\''
 let str_literal = '\"' ([^ '\\' '\"'] | '\\' _)* '\"'
 let identifier = (upper | lower | '_') (digit | upper | lower | '_') *
@@ -73,6 +97,7 @@ rule main = parse
 | "(*"           { comment lexbuf ; main lexbuf }
 | "(*!"          { Buffer.clear code_buf ; cpp_code lexbuf ;
                    CPP_CODE (get_code ()) }
+| "#use"         { HASH_USE }
 | "&&"           { ANDAND }
 | "||"           { BARBAR }
 | '|'            { BAR }
@@ -101,10 +126,10 @@ rule main = parse
 | ']'            { RBRACKET }
 | '_'            { UNDERSCORE }
 | '\''           { QUOTE }
-| int_literal    { VINT (int_of_string (Lexing.lexeme lexbuf)) }
-| float_literal  { VFLOAT (float_of_string (Lexing.lexeme lexbuf)) }
-| char_literal   { VCHAR ((get_quoted lexbuf).[0]) }
-| str_literal    { VSTRING (get_quoted lexbuf) }
+| int_literal    { LITERAL_INT (get_int lexbuf) }
+| float_literal  { LITERAL_FLOAT (get_float lexbuf) }
+| char_literal   { LITERAL_CHAR ((get_quoted lexbuf).[0]) }
+| str_literal    { LITERAL_STRING (get_quoted lexbuf) }
 | identifier     { make_ident lexbuf }
 | eof            { EOF }
 | _              { errorf ~loc:(EmlLocation.from_lexbuf lexbuf)
@@ -113,6 +138,7 @@ rule main = parse
 and comment = parse
   "(*"           { comment lexbuf ; comment lexbuf }
 | "*)"           { () }
+| ['\n' '\r']    { Lexing.new_line lexbuf ; comment lexbuf }
 | eof            { Format.eprintf "Warning: unterminated comment@." }
 | _              { comment lexbuf }
 
@@ -120,6 +146,9 @@ and cpp_code = parse
   "(*"           { Buffer.add_string code_buf (Lexing.lexeme lexbuf) ;
                    cpp_code lexbuf ; cpp_code lexbuf }
 | "*)"           { Buffer.add_string code_buf (Lexing.lexeme lexbuf) }
+| ['\n' '\r']    { Lexing.new_line lexbuf ;
+                   Buffer.add_string code_buf (Lexing.lexeme lexbuf) ;
+                   cpp_code lexbuf }
 | eof            { Format.eprintf "Warning: unterminated C++ code block@." }
 | _              { Buffer.add_string code_buf (Lexing.lexeme lexbuf) ;
                    cpp_code lexbuf }

@@ -29,7 +29,7 @@ let make_renamer tbl0 tops =
     (StringSet.add id2 seen, (id1, id2) :: tbl)
   in
   let aux rnm top = match top.EmlLocation.data with
-    | Top_code _ | Top_variant_type _ -> rnm
+    | Top_code _ | Top_type _ -> rnm
     | Top_let (_, id, _, _) -> add ~loc:top.EmlLocation.loc rnm id id
   in
   let rnm =
@@ -45,16 +45,16 @@ let genid seen s =
   let s' = if StringSet.mem s seen then aux 1 else s in
   (StringSet.add s' seen, s')
 
-let rename_args tbl = List.map (EmlOption.map (fun x -> List.assoc x tbl))
+let rename_args tbl = List.map (Option.map (fun x -> List.assoc x tbl))
 
 let rec conv_expr tbl seen e = match e.data with
   | Const _ | Error -> (seen, e)
   | Ext (Tag e0) ->
     let (seen', e0') = conv_expr tbl seen e0 in
     (seen', { e with data = Ext (Tag e0') })
-  | Ext (Proj (e0, i)) ->
+  | Ext (Proj (e0, n, i)) ->
     let (seen', e0') = conv_expr tbl seen e0 in
-    (seen', { e with data = Ext (Proj (e0', i)) })
+    (seen', { e with data = Ext (Proj (e0', n, i)) })
   | Ext (Box e0) ->
     let (seen', e0') = conv_expr tbl seen e0 in
     (seen', { e with data = Ext (Box e0') })
@@ -68,9 +68,9 @@ let rec conv_expr tbl seen e = match e.data with
   | Tuple el ->
     let (seen', el') = List.fold_map (conv_expr tbl) seen el in
     (seen', { e with data = Tuple el' })
-  | EmlOp op ->
+  | Op op ->
     let (seen', op') = EmlOp.fold_map (conv_expr tbl) seen op in
-    (seen', { e with data = EmlOp op' })
+    (seen', { e with data = Op op' })
   | If (e1, e2, e3) ->
     let (seen', e1') = conv_expr tbl seen e1 in
     let (seen', e2') = conv_expr tbl seen' e2 in
@@ -90,13 +90,13 @@ let rec conv_expr tbl seen e = match e.data with
     let (seen', new_id) = genid seen id in
     let tbl' = (id, new_id) :: tbl in
     let (seen', e1') = if rf then conv_expr tbl' seen' e1
-      else conv_expr tbl seen e1 in
+      else conv_expr tbl seen' e1 in
     let (seen', e2') = conv_expr tbl' seen' e2 in
     (seen', { e with data = Let (rf, new_id, ts, e1', e2') })
 
 let convert (seen, tbl) tops =
   let aux = function (* top-level identifiers will not be renamed. *)
-    | Top_code _ | Top_variant_type _ as e -> e
+    | Top_code _ | Top_type _ as e -> e
     | Top_let(rf, id, ts, e) -> Top_let(rf, id, ts, snd (conv_expr tbl seen e))
   in
   List.map (EmlLocation.map aux) tops

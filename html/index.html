@@ -4,6 +4,24 @@
     <meta charset="utf8">
     <link rel="stylesheet" href="css/codemirror.css">
     <style text="text/css">
+     a, a:hover, a:visited, a:active {
+       color: #16f;
+       text-decoration: none;
+     }
+     a:hover { text-decoration: underline; }
+     input, input:hover {
+       border-top: 1px solid #ccc;
+       border-left: 1px solid #ccc;
+       border-right: 1px solid #999;
+       border-bottom: 1px solid #999;
+       border-radius: 3px;
+       font-weight: bold;
+       padding: 3px 6px;
+     }
+     input:hover {
+       background: #ccc;
+     }
+
      .line-error { background: yellow; }
      .CodeMirror {
        font-size: 0.85em;
@@ -28,72 +46,54 @@
   </head>
   <body>
     <h1>Evil ML: ML to C++ template language</h1>
-    <p>See <a href="https://github.com/akabe/evilml">https://github.com/akabe/evilml</a> for details.</p>
+    <p><a href="https://travis-ci.org/akabe/evilml" alt="Build Status"><img src="https://travis-ci.org/akabe/evilml.svg"></a></p>
+    <p>
+      Evil ML is a joke compiler from ML to <strong>C++ template language</strong>
+      (not ordinary C++ code). Please, don't use this for practical purposes.
+    </p>
+    <p>
+      C++ template is a <strong>higher-order pure functional</strong> programming language
+      traditionally used for <strong>compile-time</strong> computation, while its syntax is
+      verbose and hard to use.
+      <a href="https://en.wikipedia.org/wiki/ML_%28programming_language%29">ML</a>,
+      a higher-order functional programming language, is simple, practical and
+      easy to understand, so that we jokingly implemented this compiler. You can
+      easily use black magic in C++ template programming. This will give you nightmares.
+    </p>
+    <p>
+      <ul>
+        <li> <a href="http://ocaml.org">OCaml</a>-like higher-order pure functional language
+          (Hindley-Milner polymorphism, no value restriction).</li>
+        <li>Type inference is performed. Most types are automatically inferred.</li>
+        <li>Variant types are supported.</li>
+        <li>You can write raw C++ code in <code>(*! ... *)</code> in top level.</li>
+        <li><code>#use "foo.ml"</code> loads .ml files in top level (double semi-colons <code>;;</code> are not needed at the end).
+          The .ml files you can load are found in directory <a href="https://github.com/akabe/evilml/blob/master/include">evilml/include</a>.</li>
+      </ul>
+      See <a href="https://github.com/akabe/evilml">https://github.com/akabe/evilml</a> for details.</p>
+    <div>
+      Examples:
+      <input type="button" value="Fibonacci" id="btn_ex_fib">
+      <input type="button" value="Quick sort" id="btn_ex_qsort">
+      <input type="button" value="Topological sort" id="btn_ex_tsort">
+      <input type="button" value="Dijkstra's algoritm" id="btn_ex_dijkstra">
+      <input type="button" value="BASE64 encoding" id="btn_ex_base64">
+    </div>
+    <hr>
     <div>
       <input type="button" value="Compile" id="btn_compile">
       <input type="button" value="Remove error highlight" id="btn_unerror" disabled>
       <input type="checkbox" id="chk_embed">
       <label for="chk_embed">
         Generate stand-alone code
-        (embedding <a href="https://github.com/akabe/evilml/blob/master/includes/evilml.hpp">evilml.hpp</a>)
+        (embedding <a href="https://github.com/akabe/evilml/blob/master/include/evilml.hpp">evilml.hpp</a>)
       </label>
     </div>
     <div class="codebox leftbox">
       <h2>Input: OCaml code</h2>
-      <textarea id="mlcode">(* Example: quick sort *)
-
-type 'a list = [] | :: of 'a * 'a list
-
-let rec foldr f xs acc = match xs with
-  | [] -> acc
-  | x :: xs -> f x (foldr f xs acc)
-
-let length xs = foldr (fun _ acc -> acc + 1) xs 0
-let append xs ys = foldr (fun y acc -> y :: acc) xs ys
-let filter f xs = foldr (fun x acc -> if f x then x :: acc else acc) xs []
-
-let rec qsort xs = match xs with
-  | [] -> []
-  | [x] -> [x]
-  | pivot :: rest ->
-    let ys = qsort (filter (fun x -> x < pivot) rest) in
-    let zs = qsort (filter (fun x -> x >= pivot) rest) in
-    append ys (pivot :: zs)
-
-let rec nth i xs = match xs with
-  | [] -> error
-  | x :: xs -> if i = 0 then x else nth (i-1) xs
-
-let l1 = [5; 4; 8; 1; 6; 3; 7; 2]
-let l2 = qsort l1
-let x0 = nth 0 l2
-let x1 = nth 1 l2
-let x2 = nth 2 l2
-let x3 = nth 3 l2
-let x4 = nth 4 l2
-let x5 = nth 5 l2
-let x6 = nth 6 l2
-let x7 = nth 7 l2
-
-(*!
-// This is C++ code.
-
-#include <cstdio>
-
-int main () { // We use printf in order to output readable assembly code.
-  std::printf("%d  ", x0::val);
-  std::printf("%d  ", x1::val);
-  std::printf("%d  ", x2::val);
-  std::printf("%d  ", x3::val);
-  std::printf("%d  ", x4::val);
-  std::printf("%d  ", x5::val);
-  std::printf("%d  ", x6::val);
-  std::printf("%d\n", x7::val);
-  return 0;
-}
-*)</textarea>
-        <h2>Type Inference Result</h2>
-        <textarea id="type_inf"></textarea>
+      <textarea id="mlcode">(* Write your OCaml code here *)</textarea>
+      <h2>Type Inference Result</h2>
+      <textarea id="type_inf"></textarea>
     </div>
     <div class="codebox rightbox">
       <h2>Output: C++ code</h2>
@@ -132,7 +132,7 @@ int main () { // We use printf in order to output readable assembly code.
 
      function removeError () {
        var btn = document.getElementById("btn_unerror");
-       if (!btn.disabled) btn.onclick(); // Remove the last error highlight
+       if (!btn.disabled && btn.onclick) btn.onclick(); // Remove the last error highlight
      }
 
      // Called when compilation succeeds.

@@ -32,14 +32,14 @@ and expr_desc =
   | Const of EmlSyntax.const
   | Var of string
   | If of expr * expr * expr
-  | EmlOp of expr EmlOp.t
+  | Op of expr EmlOp.t
   | Tuple of expr list
   | Constr of string * expr list
   | App of expr * expr list
   | Box of expr
   | Unbox of expr
   | Tag of expr (* Obtain the tag of a data constructor *)
-  | Proj of expr * int (* Projection operator *)
+  | Proj of expr * int * int (* Projection operator *)
 
 and let_expr = let_expr_desc list * expr [@@deriving show]
 and let_expr_desc =
@@ -47,7 +47,7 @@ and let_expr_desc =
   | Let_fun of bool * string * EmlType.scheme * string option list * let_expr
 
 type top =
-  | Top_variant_type of string * EmlType.t list * (int * string * EmlType.t list) list
+  | Top_type of EmlType.decl
   | Top_let of let_expr_desc
   | Top_code of string [@@deriving show]
 
@@ -57,9 +57,9 @@ let rec conv_expr rev_lets { E.data; E.typ; _ } = match data with
   | E.Error -> (rev_lets, { typ; data = Error })
   | E.Const c -> (rev_lets, { typ; data = Const c })
   | E.Var id -> (rev_lets, { typ; data = Var id })
-  | E.EmlOp op ->
+  | E.Op op ->
     let (rev_lets', op') = EmlOp.fold_map conv_expr rev_lets op in
-    (rev_lets', { typ; data = EmlOp op' })
+    (rev_lets', { typ; data = Op op' })
   | E.Ext (B.Box e1) ->
     let (rev_lets', e1') = conv_expr rev_lets e1 in
     (rev_lets', { typ; data = Box e1'; })
@@ -69,9 +69,9 @@ let rec conv_expr rev_lets { E.data; E.typ; _ } = match data with
   | E.Ext (B.Tag e1) ->
     let (rev_lets', e1') = conv_expr rev_lets e1 in
     (rev_lets', { typ; data = Tag e1'; })
-  | E.Ext (B.Proj (e1, i)) ->
+  | E.Ext (B.Proj (e1, n, i)) ->
     let (rev_lets', e1') = conv_expr rev_lets e1 in
-    (rev_lets', { typ; data = Proj (e1', i); })
+    (rev_lets', { typ; data = Proj (e1', n, i); })
   | E.If (e1, e2, e3) ->
     let (rev_lets', e1') = conv_expr rev_lets e1 in
     let (rev_lets', e2') = conv_expr rev_lets' e2 in
@@ -111,8 +111,7 @@ and conv_let_val rev_lets id ts e =
 let convert tops =
   let aux rev_tops e = match e.L.data with
     | E.Top_code s -> Top_code s :: rev_tops
-    | E.Top_variant_type (name, args, cs) ->
-      (Top_variant_type (name, args, cs)) :: rev_tops
+    | E.Top_type decl -> Top_type decl :: rev_tops
     | E.Top_let (rf, id, ts, { E.data = E.Abs (args, e11); _ }) ->
       (Top_let (conv_abs rf id ts args e11)) :: rev_tops
     | E.Top_let (_, id, ts, e1) ->

@@ -18,7 +18,7 @@
 open EmlUtils
 open Format
 
-type type_var = int
+type type_var = int [@@deriving show]
 
 type t =
   | Unit
@@ -32,11 +32,22 @@ type t =
   | Var of string option * type_var
   | Ref of t ref (* for destructive unification *)
 
-(** {2 EmlTypes} *)
+(** {2 Sets of type variables} *)
 
-let genvar =
+module VarSet = Set.Make(struct
+    type t = type_var
+    let compare = Pervasives.compare
+  end)
+
+(** {2 Types} *)
+
+let fresh_type_var =
   let c = ref 0 in
-  fun ?name () -> incr c ; Ref (ref (Var (name, !c)))
+  fun () -> incr c ; !c
+
+let make_var ?name i = Ref (ref (Var (name, i)))
+
+let fresh_var ?name () = make_var ?name (fresh_type_var ())
 
 let rec observe = function
   | Ref r -> observe !r
@@ -45,12 +56,10 @@ let rec observe = function
 let name_of_int n =
   let chrs = "abcdefghijklmnopqrstuvwxyz" in
   let m = String.length chrs in
-  let b = Buffer.create 2 in
-  let rec aux n =
-    if n > 0 then begin Buffer.add_char b chrs.[n mod m] ; aux (n / m) end
-    else Buffer.contents b
+  let rec aux s n =
+    if n < 0 then s else aux (Char.escaped chrs.[n mod m] ^ s) (n / m - 1)
   in
-  if n = 0 then "a" else aux n
+  aux "" n
 
 let is_basetype t = match observe t with
   | Bool | Char | Int | Float -> true
@@ -59,6 +68,32 @@ let is_basetype t = match observe t with
 let unarrow t = match observe t with
   | Arrow (args, ret) -> Some (args, ret)
   | _ -> None
+
+let box_type t =
+  let rec conv t = match observe t with
+    | Bool | Char | Int | Float -> Tconstr ("__ml_boxed", [t])
+    | Arrow (args, ret) -> Arrow (List.map conv args, conv ret)
+    | Tconstr (name, tl) when name <> "__ml_boxed" ->
+      Tconstr (name, List.map conv tl)
+    | Tuple tl -> Tuple (List.map conv tl)
+    | _ -> t
+  in
+  (is_basetype t, conv t)
+
+let unbox_type t = match observe t with
+  | Tconstr ("__ml_boxed", [t']) -> (true, t')
+  | _ -> (false, t)
+
+let fv_in_type =
+  let rec aux acc t = match observe t with
+    | Ref _ -> assert false
+    | Unit | Bool | Char | Int | Float -> acc
+    | Var (_, i) -> VarSet.add i acc
+    | Tuple tl -> List.fold_left aux acc tl
+    | Tconstr (_, tl) -> List.fold_left aux acc tl
+    | Arrow (args, ret) -> List.fold_left aux (aux acc ret) args
+  in
+  aux VarSet.empty
 
 let get_var_name =
   let tbl = ref [] in
@@ -137,76 +172,70 @@ let unify ~loc t0 u0 =
     | Arrow _, Arrow ([], ur) -> aux t ur
     | _ -> errorf ~loc "This expression has type %a\n\
                         but an expression was expected of type %a\n\
-                        EmlType %a is not compatible with %a"
+                        Type %a is not compatible with %a"
              pp t0 pp u0 pp t pp u ()
   in
   aux t0 u0
 
-(** {2 EmlType scheme} *)
+(** {2 Type scheme} *)
 
-module VarsSet = Set.Make(struct
-    type t = type_var
-    let compare = Pervasives.compare
-  end)
-
-type scheme = VarsSet.t * t
+type scheme = VarSet.t * t
 
 type context = (string * scheme) list
 
-let scheme t = (VarsSet.empty, t)
+let scheme t = (VarSet.empty, t)
 
-let free_vars_in_type =
-  let rec aux acc t = match observe t with
-    | Ref _ -> assert false
-    | Unit | Bool | Char | Int | Float -> acc
-    | Var (_, i) -> VarsSet.add i acc
-    | Tuple tl -> List.fold_left aux acc tl
-    | Tconstr (_, tl) -> List.fold_left aux acc tl
-    | Arrow (args, ret) -> List.fold_left aux (aux acc ret) args
-  in
-  aux VarsSet.empty
-
-let free_vars_in_scheme (bound_vars, t) =
-  let free_vars = free_vars_in_type t in
-  VarsSet.diff free_vars bound_vars
-
-let free_vars_in_context ctx =
-  List.fold_left (fun acc (_, ts) -> VarsSet.union acc (free_vars_in_scheme ts))
-    VarsSet.empty ctx
-
-(** [subst_vars vars t0] substitutes type variables [vars] in [t0] for fresh
-    variables. *)
-let subst_vars vars t0 =
-  let tbl = List.map (fun i -> (i, genvar ())) (VarsSet.elements vars) in
+let generalize vars t0 =
+  let old_vars = VarSet.elements vars in
+  let new_vars = List.map (fun _ -> fresh_type_var ()) old_vars in
+  let tbl = List.map2 (fun i j -> (i, make_var j)) old_vars new_vars in
   let rec aux t = match observe t with
     | Ref _ -> assert false
     | Unit | Bool | Char | Int | Float -> t
-    | Var (_, i) -> if VarsSet.mem i vars then List.assoc i tbl else t
+    | Var (_, i) -> if VarSet.mem i vars then List.assoc i tbl else t
     | Tuple tl -> Tuple (List.map aux tl)
     | Tconstr (s, tl) -> Tconstr (s, List.map aux tl)
     | Arrow (args, ret) -> Arrow (List.map aux args, aux ret)
   in
-  let var_num (_, t) = match observe t with
-    | Var (_, i) -> i
-    | _ -> assert false
-  in
-  (VarsSet.of_list (List.map var_num tbl), aux t0)
+  (VarSet.of_list new_vars, aux t0)
 
-let generalize ctx t =
-  let bound_vars = free_vars_in_context ctx in
-  let free_vars = free_vars_in_type t in
-  (VarsSet.diff free_vars bound_vars, t)
+let instantiate (vars, t) = generalize vars t |> snd
 
-let instantiate (vars, t) = subst_vars vars t |> snd
+let fv_in_scheme (bv, t) = VarSet.diff (fv_in_type t) bv
+
+let box_scheme (vars, t) =
+  let (need, t') = box_type t in
+  (need, (vars, t'))
+
+let unbox_scheme (vars, t) =
+  let (need, t') = unbox_type t in
+  (need, (vars, t'))
 
 let pp_scheme ppf (vars, t) =
-  match VarsSet.elements vars with
+  match VarSet.elements vars with
   | [] -> pp ppf t
   | l -> fprintf ppf "@[forall @[%a@].@;<1 2>@[%a@]@]"
            (pp_list_comma pp_var) l pp t
 
-(** {2 EmlTyping contexts} *)
+(** {2 Type declaration} *)
 
-let lookup ~loc s ctx =
-  try List.assoc s ctx
-  with Not_found -> errorf ~loc "Unbound identifier `%s'" s ()
+type constr_tag = int [@@deriving show]
+
+type decl =
+  | Variant of string (* type name *)
+               * type_var list (* type parameters of type constructor *)
+               * (constr_tag * string * t list) list (* constructors *)
+                 [@@deriving show]
+
+let make_constr_tags =
+  List.mapi (fun i (_, cargs) ->
+      let n = List.length cargs in (* # of arguments *)
+      let m = if n >= 2 then 2 else n in (* m = 0, 1, 2 [2 bits] *)
+      ((i + 1) lsl 2) lor m)
+
+let constr_scheme ty_name ty_vars c_args =
+  let ty_args = List.map (make_var ?name:None) ty_vars in
+  let ret = Tconstr (ty_name, ty_args) in
+  let t = Arrow (c_args, ret) in
+  let fv = fv_in_type t in
+  generalize fv t

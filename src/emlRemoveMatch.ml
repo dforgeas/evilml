@@ -24,13 +24,14 @@ module T = EmlTyping
 type expr = ext_expr base_expr [@@deriving show]
 and ext_expr =
   | Tag of expr (* Obtain the tag of a data constructor *)
-  | Proj of expr * int (* Projection operator *)
+  | Proj of expr * int * int (* Projection operator *)
 
 type top = ext_expr base_top [@@deriving show]
 
-let mk_exp_proj ~loc ~typ e i = { loc; typ; data = Ext (Proj (e, i)); }
+let mk_exp_proj ~loc ~typ e n i = { loc; typ; data = Ext (Proj (e, n, i)); }
 let mk_exp_tag ~loc e = { loc; typ = EmlType.Int; data = Ext (Tag e); }
-let mk_exp_eq ~loc e1 e2 = { loc; typ = EmlType.Bool; data = EmlOp (EmlOp.Eq (e1, e2)); }
+let mk_exp_eq ~loc e1 e2 =
+  { loc; typ = EmlType.Bool; data = Op (EmlOp.Eq (e1, e2)); }
 let mk_exp_if_eq ~loc e_lhs e_rhs e2 e3 =
   mk_exp_if ~loc (mk_exp_eq ~loc e_lhs e_rhs) e2 e3
 
@@ -54,8 +55,10 @@ let rec conv_pat e e_then e_else p =
     mk_exp_if_eq ~loc (mk_exp_tag ~loc e) (mk_exp_int ~loc tag) e_then' e_else
 
 and conv_pat_list ~loc e e_then e_else pl =
+  let n = List.length pl in
   List.fold_righti
-    (fun i pi acc -> conv_pat (mk_exp_proj ~loc ~typ:pi.typ e i) acc e_else pi)
+    (fun i pi acc ->
+       conv_pat (mk_exp_proj ~loc ~typ:pi.typ e n i) acc e_else pi)
     pl e_then
 
 let rec conv_expr e = match e.data with
@@ -64,7 +67,7 @@ let rec conv_expr e = match e.data with
   | Var id -> { e with data = Var id }
   | Constr (id, el) -> { e with data = Constr (id, List.map conv_expr el) }
   | Tuple el -> { e with data = Tuple (List.map conv_expr el) }
-  | EmlOp op -> { e with data = EmlOp (EmlOp.map conv_expr op) }
+  | Op op -> { e with data = Op (EmlOp.map conv_expr op) }
   | Abs (args, e0) -> { e with data = Abs (args, conv_expr e0) }
   | App (e0, el) ->
     { e with data = App (conv_expr e0, List.map conv_expr el) }
@@ -76,6 +79,6 @@ let rec conv_expr e = match e.data with
   | Ext (T.Match (e0, cases)) ->
     let e0' = conv_expr e0 in
     List.fold_right (fun (pi, ei) acc -> conv_pat e0' (conv_expr ei) acc pi)
-      cases { e with typ = EmlType.genvar (); data = Error; }
+      cases { e with typ = EmlType.fresh_var (); data = Error; }
 
 let convert = map conv_expr

@@ -32,7 +32,7 @@ and expr_desc =
   | Error
   | Const of EmlSyntax.const
   | Var of string
-  | EmlOp of expr EmlOp.t
+  | Op of expr EmlOp.t
   | App of expr * type_expr list
   | Tmember of template_flag * expr * string
   | Vmember of expr * string
@@ -66,7 +66,7 @@ let mk_type_expr e : type_expr = match e.data with
 
 let mk_exp_const c = { dep = false; data = Const c; }
 let mk_exp_var ?(deps = []) id = { dep = List.mem id deps; data = Var id; }
-let mk_exp_op op = { dep = EmlOp.exists (fun ei -> ei.dep) op; data = EmlOp op; }
+let mk_exp_op op = { dep = EmlOp.exists (fun ei -> ei.dep) op; data = Op op; }
 let mk_exp_vmem e mem = { dep = e.dep; data = Vmember (e, mem); }
 let mk_exp_tmem ?(deps = []) ?(template = false) e mem =
   let flag = template && not (List.is_empty deps) in
@@ -86,15 +86,15 @@ let mk_exp_tuple el = match List.rev el with
   | [] -> assert false
   | last :: rest -> List.fold_left (fun acc ei -> mk_exp_pair ei acc) last rest
 
-let rec mk_exp_proj e = function
-  | 0 -> mk_exp_tmem e member_fst
-  | 1 -> mk_exp_tmem e member_snd
-  | i -> mk_exp_proj (mk_exp_tmem e member_snd) (i - 1)
+let rec mk_exp_proj e n i = match n, i with
+  | _, 0 -> mk_exp_tmem e member_fst
+  | 2, 1 -> mk_exp_tmem e member_snd
+  | _, i -> mk_exp_proj (mk_exp_tmem e member_snd) (n - 1) (i - 1)
 
 let mk_decl_typedef id e = EmlTypedef (id, mk_type_expr e)
 let mk_decl_tag tag =
   Static (member_tag, EmlType.Int, mk_exp_const (EmlSyntax.Int tag))
-let mk_decl_ret e = [mk_decl_tag 0; mk_decl_typedef member_ret e]
+let mk_decl_ret e = [mk_decl_typedef member_ret e]
 
 (** [deps] is a list of variable names dependent on template parameters. *)
 let rec conv_expr deps { F.data; _ } = match data with
@@ -107,7 +107,7 @@ let rec conv_expr deps { F.data; _ } = match data with
          (mk_exp_var "__ml_if")
          [conv_expr deps e1; conv_expr deps e2; conv_expr deps e3])
       member_ret
-  | F.EmlOp op -> conv_op deps op
+  | F.Op op -> conv_op deps op
   | F.Tuple el -> mk_exp_tuple (List.map (conv_expr deps) el)
   | F.Constr (id, []) -> mk_exp_var (get_constr_name id)
   | F.Constr (id, el) ->
@@ -121,7 +121,7 @@ let rec conv_expr deps { F.data; _ } = match data with
   | F.Box e0 -> mk_exp_box ~typ:e0.F.typ (conv_expr deps e0)
   | F.Unbox e0 -> mk_exp_unbox (conv_expr deps e0)
   | F.Tag e0 -> mk_exp_vmem (conv_expr deps e0) member_tag
-  | F.Proj (e0, i) -> mk_exp_proj (conv_expr deps e0) i
+  | F.Proj (e0, n, i) -> mk_exp_proj (conv_expr deps e0) n i
 
 and conv_op deps op =
   let aux typ mk id_cmp e1 e2 =
@@ -134,12 +134,18 @@ and conv_op deps op =
     | _ -> mk_exp_vmem (mk_exp_app (mk_exp_var id_cmp) [e1'; e2']) member_val
   in
   match op with
-  | EmlOp.Eq (e1, e2) -> aux e1.F.typ (fun e1 e2 -> EmlOp.Eq (e1, e2)) "__ml_eq" e1 e2
-  | EmlOp.Ne (e1, e2) -> aux e1.F.typ (fun e1 e2 -> EmlOp.Ne (e1, e2)) "__ml_ne" e1 e2
-  | EmlOp.Ge (e1, e2) -> aux e1.F.typ (fun e1 e2 -> EmlOp.Ge (e1, e2)) "__ml_ge" e1 e2
-  | EmlOp.Le (e1, e2) -> aux e1.F.typ (fun e1 e2 -> EmlOp.Le (e1, e2)) "__ml_le" e1 e2
-  | EmlOp.Gt (e1, e2) -> aux e1.F.typ (fun e1 e2 -> EmlOp.Gt (e1, e2)) "__ml_gt" e1 e2
-  | EmlOp.Lt (e1, e2) -> aux e1.F.typ (fun e1 e2 -> EmlOp.Lt (e1, e2)) "__ml_lt" e1 e2
+  | EmlOp.Eq (e1, e2) ->
+    aux e1.F.typ (fun e1 e2 -> EmlOp.Eq (e1, e2)) "__ml_eq" e1 e2
+  | EmlOp.Ne (e1, e2) ->
+    aux e1.F.typ (fun e1 e2 -> EmlOp.Ne (e1, e2)) "__ml_ne" e1 e2
+  | EmlOp.Ge (e1, e2) ->
+    aux e1.F.typ (fun e1 e2 -> EmlOp.Ge (e1, e2)) "__ml_ge" e1 e2
+  | EmlOp.Le (e1, e2) ->
+    aux e1.F.typ (fun e1 e2 -> EmlOp.Le (e1, e2)) "__ml_le" e1 e2
+  | EmlOp.Gt (e1, e2) ->
+    aux e1.F.typ (fun e1 e2 -> EmlOp.Gt (e1, e2)) "__ml_gt" e1 e2
+  | EmlOp.Lt (e1, e2) ->
+    aux e1.F.typ (fun e1 e2 -> EmlOp.Lt (e1, e2)) "__ml_lt" e1 e2
   | op -> mk_exp_op (EmlOp.map (conv_expr deps) op)
 
 and conv_let_expr deps (lets, e) =
@@ -194,7 +200,7 @@ let conv_constr (tag, id, t_deps) =
 let convert ~header =
   let aux rev_tops = function
     | F.Top_let led -> snd (conv_let_expr_desc [] led) :: rev_tops
-    | F.Top_variant_type (_, _, constrs) ->
+    | F.Top_type (EmlType.Variant (_, _, constrs)) ->
       let constrs' = List.rev_map conv_constr constrs in
       constrs' @ rev_tops
     | F.Top_code s -> Code s :: rev_tops
@@ -213,7 +219,7 @@ let pp_template_arg ppf = function
 let rec pp_expr ppf e = match e.data with
   | Error | Const EmlSyntax.Unit -> pp_print_string ppf "void"
   | Const (EmlSyntax.Bool b) -> pp_print_bool ppf b
-  | Const (EmlSyntax.Char c) -> fprintf ppf "%C" c
+  | Const (EmlSyntax.Char c) -> fprintf ppf "%d" (int_of_char c)
   | Const (EmlSyntax.Int n) -> pp_print_int ppf n
   | Const (EmlSyntax.Float x) -> pp_print_float ppf x
   | Var id -> pp_print_string ppf id
@@ -221,26 +227,36 @@ let rec pp_expr ppf e = match e.data with
     fprintf ppf "%a::@;<0 2>%s%s"
       pp_expr e0 (if b then "template " else "") field
   | Vmember (e0, field) -> fprintf ppf "%a::@;<0 2>%s" pp_expr e0 field
-  | EmlOp (EmlOp.Not e1) -> fprintf ppf "!@[%a@]" pp_expr e1
-  | EmlOp (EmlOp.And (e1, e2)) -> fprintf ppf "(@[%a@ && %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Or (e1, e2)) -> fprintf ppf "(@[%a@ || %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Pos e1) | EmlOp (EmlOp.FPos e1) -> fprintf ppf "+@[%a@]" pp_expr e1
-  | EmlOp (EmlOp.Neg e1) | EmlOp (EmlOp.FNeg e1) -> fprintf ppf "-@[%a@]" pp_expr e1
-  | EmlOp (EmlOp.Add (e1, e2)) | EmlOp (EmlOp.FAdd (e1, e2)) ->
+  | Op (EmlOp.Not e1) -> fprintf ppf "!@[%a@]" pp_expr e1
+  | Op (EmlOp.And(e1,e2)) -> fprintf ppf "(@[%a@ && %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Or (e1,e2)) -> fprintf ppf "(@[%a@ || %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Pos e1) | Op (EmlOp.FPos e1) -> fprintf ppf "+@[%a@]" pp_expr e1
+  | Op (EmlOp.Neg e1) | Op (EmlOp.FNeg e1) -> fprintf ppf "-@[%a@]" pp_expr e1
+  | Op (EmlOp.Add (e1, e2)) | Op (EmlOp.FAdd (e1, e2)) ->
     fprintf ppf "(@[%a@ + %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Sub (e1, e2)) | EmlOp (EmlOp.FSub (e1, e2)) ->
+  | Op (EmlOp.Sub (e1, e2)) | Op (EmlOp.FSub (e1, e2)) ->
     fprintf ppf "(@[%a@ - %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Mul (e1, e2)) | EmlOp (EmlOp.FMul (e1, e2)) ->
+  | Op (EmlOp.Mul (e1, e2)) | Op (EmlOp.FMul (e1, e2)) ->
     fprintf ppf "(@[%a@ * %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Div (e1, e2)) | EmlOp (EmlOp.FDiv (e1, e2)) ->
+  | Op (EmlOp.Div (e1, e2)) | Op (EmlOp.FDiv (e1, e2)) ->
     fprintf ppf "(@[%a@ / %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Mod (e1, e2)) -> fprintf ppf "(@[%a@ %% %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Eq (e1, e2)) -> fprintf ppf "(@[%a@ == %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Ne (e1, e2)) -> fprintf ppf "(@[%a@ != %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Lt (e1, e2)) -> fprintf ppf "(@[%a@ < %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Gt (e1, e2)) -> fprintf ppf "(@[%a@ > %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Le (e1, e2)) -> fprintf ppf "(@[%a@ <= %a@])" pp_expr e1 pp_expr e2
-  | EmlOp (EmlOp.Ge (e1, e2)) -> fprintf ppf "(@[%a@ >= %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Mod(e1,e2)) -> fprintf ppf "(@[%a@ %% %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Eq(e1,e2)) -> fprintf ppf "(@[%a@ == %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Ne(e1,e2)) -> fprintf ppf "(@[%a@ != %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Lt(e1,e2)) -> fprintf ppf "(@[%a@ < %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Gt(e1,e2)) -> fprintf ppf "(@[%a@ > %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Le(e1,e2)) -> fprintf ppf "(@[%a@ <= %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Ge(e1,e2)) -> fprintf ppf "(@[%a@ >= %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Lnot e1) -> fprintf ppf "(@[~ %a@])" pp_expr e1
+  | Op (EmlOp.Land(e1,e2)) -> fprintf ppf "(@[%a@ & %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Lor(e1,e2)) -> fprintf ppf "(@[%a@ | %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Lxor(e1,e2)) -> fprintf ppf "(@[%a@ ^ %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Lsl(e1,e2)) ->
+    fprintf ppf "(@[(unsigned int)@ %a@ << %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Lsr(e1,e2)) ->
+    fprintf ppf "(@[(unsigned int)@ %a@ >> %a@])" pp_expr e1 pp_expr e2
+  | Op (EmlOp.Asr(e1,e2)) ->
+    fprintf ppf "(@[(signed int)@ %a@ >> %a@])" pp_expr e1 pp_expr e2
   | App (e0, el) ->
     let sp = match List.last el with
       | (_, { data = App _; _ }) -> " "

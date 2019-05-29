@@ -2,7 +2,7 @@ OASISFormat:             0.4
 Name:                    EvilML
 Version:                 0.0.0
 Synopsis:                A compiler from ML to C++ template language
-OCamlVersion:            >= 4.02
+OCamlVersion:            >= 4.02.3
 Authors:                 Akinori ABE <abe@sf.ecei.tohoku.ac.jp>
 License:                 GPL-3
 Plugins:                 META (0.4), StdFiles (0.4), DevFiles (0.4)
@@ -10,15 +10,32 @@ XStdFilesREADME:         false
 BuildTools:              ocamlbuild
 AlphaFeatures:           ocamlbuild_more_args
 XOCamlbuildPluginTags:   package(js_of_ocaml.ocamlbuild)
+FilesAB:                 src/emlConfig.ml.ab
 
-PreBuildCommand:         ocaml gen_files.ml
-PostBuildCommand:        cp _build/src/evilml.js html/js/
+PostBuildCommand:        js_of_ocaml +js_of_ocaml/weak.js +js_of_ocaml/toplevel.js \
+                           -o html/js/evilml.js \
+                           _build/src/evilmlJS.byte
 
-PostCleanCommand:        rm -f src/evilml_hpp.ml
-
-Executable evilml_js
+Executable evilml
   Path:                  src
   MainIs:                evilml.ml
   BuildTools:            ocamlbuild
-  BuildDepends:          ppx_deriving.show,js_of_ocaml
+  BuildDepends:          ppx_deriving.show
+  CompiledObject:        best
+  DataFiles:             ../include/*.hpp, ../include/*.ml
+
+Executable evilmlJS
+  Path:                  src
+  MainIs:                evilmlJS.ml
+  BuildTools:            ocamlbuild
+  BuildDepends:          ppx_deriving.show,ppx_blob,js_of_ocaml,js_of_ocaml.ppx
   CompiledObject:        byte
+
+##
+## Tests
+##
+
+Test test
+  Run$:                 flag(tests)
+  WorkingDirectory:     test/
+  Command:              sh test.sh

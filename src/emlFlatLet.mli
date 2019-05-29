@@ -25,14 +25,14 @@ and expr_desc =
   | Const of EmlSyntax.const
   | Var of string
   | If of expr * expr * expr
-  | EmlOp of expr EmlOp.t
+  | Op of expr EmlOp.t
   | Tuple of expr list
   | Constr of string * expr list
   | App of expr * expr list
   | Box of expr
   | Unbox of expr
   | Tag of expr (* Obtain the tag of a data constructor *)
-  | Proj of expr * int (* Projection operator *)
+  | Proj of expr * int * int (* Projection operator *)
 
 and let_expr = let_expr_desc list * expr [@@deriving show]
 and let_expr_desc =
@@ -40,7 +40,7 @@ and let_expr_desc =
   | Let_fun of bool * string * EmlType.scheme * string option list * let_expr
 
 type top =
-  | Top_variant_type of string * EmlType.t list * (int * string * EmlType.t list) list
+  | Top_type of EmlType.decl
   | Top_let of let_expr_desc
   | Top_code of string [@@deriving show]
 

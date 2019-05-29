@@ -22,7 +22,7 @@ let identity x = x
 let ( << ) f g x = f (g x)
 let ( >> ) f g x = g (f x)
 
-module EmlOption =
+module Option =
 struct
   let map f = function
     | Some x -> Some (f x)
@@ -83,6 +83,14 @@ struct
       | hd :: tl -> if f hd then Some (i, hd) else aux (i+1) tl
     in
     aux 0 x
+
+  let iter3 f =
+    let rec aux xs ys zs = match xs, ys, zs with
+      | [], [], [] -> ()
+      | x :: xs, y :: ys, z :: zs -> f x y z ; aux xs ys zs
+      | _ -> failwith "EmlUtils.List.iter3"
+    in
+    aux
 
   let rev_fold_map f init x =
     fold_left
@@ -164,6 +172,20 @@ module StringSet = Set.Make(struct
 let gen_fresh_name prefix =
   let c = ref 0 in
   fun () -> incr c ; prefix ^ string_of_int !c
+
+let read_file fname =
+  let open Buffer in
+  let ic = open_in fname in
+  let b = create 256 in
+  try
+    while true do
+      add_string b (input_line ic);
+      add_char b '\n'
+    done;
+    assert false
+  with End_of_file ->
+    close_in ic;
+    contents b
 
 exception Compile_error of string EmlLocation.loc
 
